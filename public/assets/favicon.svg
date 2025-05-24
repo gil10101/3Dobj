@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <defs>
+    <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#64ffda;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#00bcd4;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="32" height="32" fill="#111111" rx="4"/>
+  
+  <!-- 3D Cube representation -->
+  <g transform="translate(8,6)">
+    <!-- Front face -->
+    <rect x="0" y="8" width="8" height="8" fill="url(#grad)" opacity="0.9"/>
+    
+    <!-- Top face -->
+    <polygon points="0,8 4,4 12,4 8,8" fill="url(#grad)" opacity="0.7"/>
+    
+    <!-- Right face -->
+    <polygon points="8,8 12,4 12,12 8,16" fill="url(#grad)" opacity="0.5"/>
+    
+    <!-- Edges for definition -->
+    <polyline points="0,8 8,8 8,16 0,16 0,8" fill="none" stroke="#ffffff" stroke-width="0.5" opacity="0.6"/>
+    <polyline points="0,8 4,4 12,4 8,8" fill="none" stroke="#ffffff" stroke-width="0.5" opacity="0.6"/>
+    <polyline points="8,8 12,4 12,12 8,16" fill="none" stroke="#ffffff" stroke-width="0.5" opacity="0.6"/>
+    <line x1="4" y1="4" x2="4" y2="12" stroke="#ffffff" stroke-width="0.5" opacity="0.6"/>
+  </g>
+</svg> 

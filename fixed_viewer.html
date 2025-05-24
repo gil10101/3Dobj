@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fixed 3D Object Viewer</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        body { 
+            margin: 0; 
+            padding: 0; 
+            overflow: hidden; 
+            background-color: #000; 
+            font-family: Arial, sans-serif;
+        }
+        
+        canvas { 
+            display: block; 
+            width: 100%; 
+            height: 100vh; 
+        }
+        
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            background-color: rgba(0, 0, 0, 0.7);
+            padding: 15px;
+            border-radius: 8px;
+            z-index: 100;
+            max-width: 300px;
+        }
+        
+        #controls {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            color: white;
+            background-color: rgba(0, 0, 0, 0.7);
+            padding: 15px;
+            border-radius: 8px;
+            z-index: 100;
+        }
+        
+        button {
+            margin: 5px;
+            padding: 10px 15px;
+            background-color: #0066cc;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background-color 0.3s;
+        }
+        
+        button:hover {
+            background-color: #0088ff;
+        }
+        
+        button.active {
+            background-color: #00aa00;
+        }
+        
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-size: 18px;
+            z-index: 200;
+        }
+        
+        .error {
+            color: #ff4444;
+            background-color: rgba(255, 68, 68, 0.1);
+            border: 1px solid #ff4444;
+            padding: 10px;
+            border-radius: 5px;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div id="loading">Initializing 3D Viewer...</div>
+    
+    <div id="info">
+        <h3>3D Object Viewer</h3>
+        <p>Click and drag to rotate<br>
+        Mouse wheel to zoom<br>
+        Right-click and drag to pan</p>
+        <div id="shape-info">Current: Cube</div>
+    </div>
+    
+    <div id="controls">
+        <button id="cube" class="active">Show Cube</button>
+        <button id="sphere">Show Sphere</button>
+        <button id="torus">Show Torus</button>
+        <button id="cylinder">Show Cylinder</button>
+        <button id="cone">Show Cone</button>
+        <br>
+        <button id="toggle-rotate">Stop Rotation</button>
+        <button id="wireframe">Show Solid</button>
+    </div>
+    
+    <script>
+        // Global variables
+        let scene, camera, renderer, controls;
+        let currentObject = null;
+        let autoRotate = true;
+        let wireframe = true;
+        let animationId = null;
+
+        // Simple OrbitControls implementation
+        function createOrbitControls(camera, domElement) {
+            return {
+                object: camera,
+                domElement: domElement,
+                enabled: true,
+                enableDamping: true,
+                dampingFactor: 0.05,
+                target: new THREE.Vector3(),
+                
+                // Internal state
+                _spherical: new THREE.Spherical(),
+                _sphericalDelta: new THREE.Spherical(),
+                _scale: 1,
+                _panOffset: new THREE.Vector3(),
+                _isMouseDown: false,
+                _mouseButtons: { LEFT: false, MIDDLE: false, RIGHT: false },
+                _lastMouse: { x: 0, y: 0 },
+                
+                // Initialize
+                init: function() {
+                    this.domElement.addEventListener('mousedown', this._onMouseDown.bind(this));
+                    this.domElement.addEventListener('mousemove', this._onMouseMove.bind(this));
+                    this.domElement.addEventListener('mouseup', this._onMouseUp.bind(this));
+                    this.domElement.addEventListener('wheel', this._onWheel.bind(this), { passive: false });
+                    this.domElement.addEventListener('contextmenu', e => e.preventDefault());
+                    this.update();
+                },
+                
+                _onMouseDown: function(event) {
+                    if (!this.enabled) return;
+                    event.preventDefault();
+                    
+                    this._isMouseDown = true;
+                    this._lastMouse.x = event.clientX;
+                    this._lastMouse.y = event.clientY;
+                    
+                    if (event.button === 0) this._mouseButtons.LEFT = true;
+                    if (event.button === 1) this._mouseButtons.MIDDLE = true;
+                    if (event.button === 2) this._mouseButtons.RIGHT = true;
+                },
+                
+                _onMouseMove: function(event) {
+                    if (!this.enabled || !this._isMouseDown) return;
+                    
+                    const deltaX = event.clientX - this._lastMouse.x;
+                    const deltaY = event.clientY - this._lastMouse.y;
+                    
+                    if (this._mouseButtons.LEFT) {
+                        // Rotate
+                        this._sphericalDelta.theta -= deltaX * 0.01;
+                        this._sphericalDelta.phi -= deltaY * 0.01;
+                    } else if (this._mouseButtons.RIGHT) {
+                        // Pan
+                        const panSpeed = 0.002;
+                        this._panOffset.x -= deltaX * panSpeed;
+                        this._panOffset.y += deltaY * panSpeed;
+                    }
+                    
+                    this._lastMouse.x = event.clientX;
+                    this._lastMouse.y = event.clientY;
+                },
+                
+                _onMouseUp: function(event) {
+                    this._isMouseDown = false;
+                    this._mouseButtons.LEFT = false;
+                    this._mouseButtons.MIDDLE = false;
+                    this._mouseButtons.RIGHT = false;
+                },
+                
+                _onWheel: function(event) {
+                    if (!this.enabled) return;
+                    event.preventDefault();
+                    
+                    if (event.deltaY < 0) {
+                        this._scale *= 0.95;
+                    } else {
+                        this._scale *= 1.05;
+                    }
+                },
+                
+                update: function() {
+                    const offset = new THREE.Vector3();
+                    const position = this.object.position;
+                    
+                    offset.copy(position).sub(this.target);
+                    this._spherical.setFromVector3(offset);
+                    
+                    this._spherical.theta += this._sphericalDelta.theta;
+                    this._spherical.phi += this._sphericalDelta.phi;
+                    this._spherical.phi = Math.max(0.1, Math.min(Math.PI - 0.1, this._spherical.phi));
+                    this._spherical.radius *= this._scale;
+                    this._spherical.radius = Math.max(1, Math.min(50, this._spherical.radius));
+                    
+                    offset.setFromSpherical(this._spherical);
+                    
+                    // Apply pan
+                    this.target.add(this._panOffset);
+                    position.copy(this.target).add(offset);
+                    this.object.lookAt(this.target);
+                    
+                    if (this.enableDamping) {
+                        this._sphericalDelta.theta *= (1 - this.dampingFactor);
+                        this._sphericalDelta.phi *= (1 - this.dampingFactor);
+                        this._panOffset.multiplyScalar(1 - this.dampingFactor);
+                    } else {
+                        this._sphericalDelta.set(0, 0, 0);
+                        this._panOffset.set(0, 0, 0);
+                    }
+                    
+                    this._scale = 1;
+                    
+                    return false;
+                },
+                
+                dispose: function() {
+                    this.domElement.removeEventListener('mousedown', this._onMouseDown);
+                    this.domElement.removeEventListener('mousemove', this._onMouseMove);
+                    this.domElement.removeEventListener('mouseup', this._onMouseUp);
+                    this.domElement.removeEventListener('wheel', this._onWheel);
+                }
+            };
+        }
+
+        // Initialize the 3D environment
+        function init() {
+            try {
+                console.log('Initializing 3D viewer...');
+                
+                // Create scene
+                scene = new THREE.Scene();
+                scene.background = new THREE.Color(0x222222);
+                
+                // Create camera
+                camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+                camera.position.set(5, 3, 5);
+                
+                // Create renderer with error handling
+                try {
+                    renderer = new THREE.WebGLRenderer({ 
+                        antialias: true,
+                        alpha: false
+                    });
+                } catch (error) {
+                    console.warn('WebGL not available, falling back to canvas renderer');
+                    throw new Error('WebGL initialization failed');
+                }
+                
+                renderer.setSize(window.innerWidth, window.innerHeight);
+                renderer.shadowMap.enabled = true;
+                renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+                
+                // Clear loading and add canvas to body
+                const loading = document.getElementById('loading');
+                if (loading) loading.style.display = 'none';
+                
+                document.body.appendChild(renderer.domElement);
+                
+                // Add lights
+                const ambientLight = new THREE.AmbientLight(0x404040, 0.6);
+                scene.add(ambientLight);
+                
+                const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+                directionalLight.position.set(10, 10, 5);
+                directionalLight.castShadow = true;
+                directionalLight.shadow.mapSize.width = 2048;
+                directionalLight.shadow.mapSize.height = 2048;
+                scene.add(directionalLight);
+                
+                // Add hemisphere light for better ambient lighting
+                const hemisphereLight = new THREE.HemisphereLight(0xffffbb, 0x080820, 0.3);
+                scene.add(hemisphereLight);
+                
+                // Create and initialize controls
+                controls = createOrbitControls(camera, renderer.domElement);
+                controls.init();
+                
+                console.log('3D environment initialized successfully');
+                
+                // Show initial cube
+                showCube();
+                
+                // Setup event listeners
+                setupEventListeners();
+                
+                // Start render loop
+                animate();
+                
+            } catch (error) {
+                console.error('Failed to initialize 3D viewer:', error);
+                showError('Failed to initialize 3D viewer: ' + error.message);
+            }
+        }
+
+        // Animation loop
+        function animate() {
+            animationId = requestAnimationFrame(animate);
+            
+            // Update controls
+            if (controls) {
+                controls.update();
+            }
+            
+            // Auto-rotate object if enabled
+            if (currentObject && autoRotate) {
+                currentObject.rotation.x += 0.008;
+                currentObject.rotation.y += 0.01;
+            }
+            
+            // Render scene
+            if (renderer && scene && camera) {
+                renderer.render(scene, camera);
+            }
+        }
+
+        // Geometry creation functions
+        function showCube() {
+            removeCurrentObject();
+            
+            const geometry = new THREE.BoxGeometry(2, 2, 2);
+            const material = new THREE.MeshStandardMaterial({ 
+                color: 0x00ff00,
+                wireframe: wireframe,
+                metalness: 0.3,
+                roughness: 0.5
+            });
+            
+            currentObject = new THREE.Mesh(geometry, material);
+            currentObject.castShadow = true;
+            currentObject.receiveShadow = true;
+            scene.add(currentObject);
+            
+            updateInfo('Cube', 'Green cube with 6 faces');
+            updateActiveButton('cube');
+        }
+
+        function showSphere() {
+            removeCurrentObject();
+            
+            const geometry = new THREE.SphereGeometry(1.5, 32, 32);
+            const material = new THREE.MeshStandardMaterial({ 
+                color: 0xff0044,
+                wireframe: wireframe,
+                metalness: 0.3,
+                roughness: 0.5
+            });
+            
+            currentObject = new THREE.Mesh(geometry, material);
+            currentObject.castShadow = true;
+            currentObject.receiveShadow = true;
+            scene.add(currentObject);
+            
+            updateInfo('Sphere', 'Red sphere with smooth surface');
+            updateActiveButton('sphere');
+        }
+
+        function showTorus() {
+            removeCurrentObject();
+            
+            const geometry = new THREE.TorusGeometry(1.2, 0.4, 16, 100);
+            const material = new THREE.MeshStandardMaterial({ 
+                color: 0x0088ff,
+                wireframe: wireframe,
+                metalness: 0.3,
+                roughness: 0.5
+            });
+            
+            currentObject = new THREE.Mesh(geometry, material);
+            currentObject.castShadow = true;
+            currentObject.receiveShadow = true;
+            scene.add(currentObject);
+            
+            updateInfo('Torus', 'Blue donut-shaped torus');
+            updateActiveButton('torus');
+        }
+
+        function showCylinder() {
+            removeCurrentObject();
+            
+            const geometry = new THREE.CylinderGeometry(1, 1, 3, 32);
+            const material = new THREE.MeshStandardMaterial({ 
+                color: 0xffaa00,
+                wireframe: wireframe,
+                metalness: 0.3,
+                roughness: 0.5
+            });
+            
+            currentObject = new THREE.Mesh(geometry, material);
+            currentObject.castShadow = true;
+            currentObject.receiveShadow = true;
+            scene.add(currentObject);
+            
+            updateInfo('Cylinder', 'Orange cylinder with circular ends');
+            updateActiveButton('cylinder');
+        }
+
+        function showCone() {
+            removeCurrentObject();
+            
+            const geometry = new THREE.ConeGeometry(1.5, 3, 32);
+            const material = new THREE.MeshStandardMaterial({ 
+                color: 0xff4400,
+                wireframe: wireframe,
+                metalness: 0.3,
+                roughness: 0.5
+            });
+            
+            currentObject = new THREE.Mesh(geometry, material);
+            currentObject.castShadow = true;
+            currentObject.receiveShadow = true;
+            scene.add(currentObject);
+            
+            updateInfo('Cone', 'Red-orange cone with circular base');
+            updateActiveButton('cone');
+        }
+
+        // Utility functions
+        function removeCurrentObject() {
+            if (currentObject) {
+                scene.remove(currentObject);
+                if (currentObject.geometry) currentObject.geometry.dispose();
+                if (currentObject.material) currentObject.material.dispose();
+                currentObject = null;
+            }
+        }
+
+        function toggleRotation() {
+            autoRotate = !autoRotate;
+            const button = document.getElementById('toggle-rotate');
+            button.textContent = autoRotate ? 'Stop Rotation' : 'Start Rotation';
+        }
+
+        function toggleWireframe() {
+            wireframe = !wireframe;
+            
+            if (currentObject && currentObject.material) {
+                currentObject.material.wireframe = wireframe;
+            }
+            
+            const button = document.getElementById('wireframe');
+            button.textContent = wireframe ? 'Show Solid' : 'Show Wireframe';
+        }
+
+        function updateInfo(shapeName, description) {
+            const shapeInfo = document.getElementById('shape-info');
+            if (shapeInfo) {
+                shapeInfo.innerHTML = `Current: ${shapeName}<br><small>${description}</small>`;
+            }
+        }
+
+        function updateActiveButton(activeId) {
+            // Remove active class from all shape buttons
+            ['cube', 'sphere', 'torus', 'cylinder', 'cone'].forEach(id => {
+                const button = document.getElementById(id);
+                if (button) button.classList.remove('active');
+            });
+            
+            // Add active class to current button
+            const activeButton = document.getElementById(activeId);
+            if (activeButton) activeButton.classList.add('active');
+        }
+
+        function setupEventListeners() {
+            // Shape buttons
+            document.getElementById('cube').addEventListener('click', showCube);
+            document.getElementById('sphere').addEventListener('click', showSphere);
+            document.getElementById('torus').addEventListener('click', showTorus);
+            document.getElementById('cylinder').addEventListener('click', showCylinder);
+            document.getElementById('cone').addEventListener('click', showCone);
+            
+            // Control buttons
+            document.getElementById('toggle-rotate').addEventListener('click', toggleRotation);
+            document.getElementById('wireframe').addEventListener('click', toggleWireframe);
+            
+            // Window resize
+            window.addEventListener('resize', onWindowResize, false);
+        }
+
+        function onWindowResize() {
+            if (camera && renderer) {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            }
+        }
+
+        function showError(message) {
+            const loading = document.getElementById('loading');
+            if (loading) {
+                loading.innerHTML = `<div class="error">Error: ${message}</div>`;
+                loading.style.display = 'block';
+            }
+        }
+
+        // Initialize when page loads
+        window.addEventListener('load', function() {
+            // Add a small delay to ensure THREE.js is fully loaded
+            setTimeout(() => {
+                if (typeof THREE === 'undefined') {
+                    showError('THREE.js library failed to load. Please check your internet connection.');
+                    return;
+                }
+                
+                console.log('THREE.js loaded, version:', THREE.REVISION);
+                init();
+            }, 100);
+        });
+
+        // Global error handling
+        window.addEventListener('error', function(event) {
+            console.error('Global error:', event.error);
+            showError('An unexpected error occurred: ' + event.error.message);
+        });
+    </script>
+</body>
+</html> 

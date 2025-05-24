@@ -1,0 +1,28 @@
+{
+  "name": "3d-viewer-app",
+  "version": "1.0.0",
+  "description": "A modular 3D JavaScript viewer with clean architecture",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js --dev",
+    "build": "node scripts/build.js",
+    "test": "node scripts/test.js",
+    "lint": "node scripts/lint.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5"
+  },
+  "devDependencies": {
+    "nodemon": "^2.0.22"
+  },
+  "keywords": ["3d", "viewer", "threejs", "rendering"],
+  "author": "",
+  "license": "MIT",
+  "directories": {
+    "src": "./src",
+    "public": "./public",
+    "scripts": "./scripts"
+  }
+} 

@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Debug 3D Viewer</title>
+</head>
+<body>
+    <div id="debug-info">
+        <h2>Debug Information</h2>
+        <div id="three-status">THREE.js: Loading...</div>
+        <div id="orbit-status">OrbitControls: Loading...</div>
+        <div id="renderer-status">Renderer: Loading...</div>
+        <div id="geometry-status">GeometryFactory: Loading...</div>
+        <div id="controller-status">ViewerController: Loading...</div>
+        <div id="debug-output" style="margin-top: 20px; font-family: monospace; font-size: 12px; background: #f0f0f0; padding: 10px; border-radius: 5px; color: #333;"></div>
+    </div>
+    
+    <div id="viewer-container" style="width: 800px; height: 600px; border: 1px solid #ccc; margin: 20px 0;"></div>
+    
+    <!-- Load THREE.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        // Check THREE.js after loading
+        document.getElementById('three-status').textContent = 
+            typeof THREE !== 'undefined' ? 'THREE.js: ✅ Loaded' : 'THREE.js: ❌ Not loaded';
+    </script>
+    
+    <!-- Load OrbitControls with multiple fallbacks -->
+    <script>
+        // Try to load OrbitControls from multiple CDNs with fallbacks
+        window.orbitControlsPromise = function loadOrbitControls() {
+            return new Promise((resolve, reject) => {
+                const cdnUrls = [
+                    'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js',
+                    'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/examples/js/controls/OrbitControls.js',
+                    'https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js'
+                ];
+                
+                let currentIndex = 0;
+                
+                function tryLoad() {
+                    if (currentIndex >= cdnUrls.length) {
+                        // All CDNs failed, use fallback implementation
+                        createFallbackOrbitControls();
+                        resolve();
+                        return;
+                    }
+                    
+                    const script = document.createElement('script');
+                    script.src = cdnUrls[currentIndex];
+                    
+                    script.onload = () => {
+                        if (typeof THREE !== 'undefined' && typeof THREE.OrbitControls !== 'undefined') {
+                            console.log('OrbitControls loaded successfully from:', cdnUrls[currentIndex]);
+                            resolve();
+                        } else {
+                            currentIndex++;
+                            tryLoad();
+                        }
+                    };
+                    
+                    script.onerror = () => {
+                        console.warn('Failed to load OrbitControls from:', cdnUrls[currentIndex]);
+                        currentIndex++;
+                        tryLoad();
+                    };
+                    
+                    document.head.appendChild(script);
+                }
+                
+                tryLoad();
+            });
+        }();
+        
+        function createFallbackOrbitControls() {
+            if (typeof THREE === 'undefined') return;
+            
+            THREE.OrbitControls = function(camera, domElement) {
+                this.object = camera;
+                this.domElement = domElement || document;
+                this.enabled = true;
+                
+                // Properties
+                this.target = new THREE.Vector3();
+                this.enableDamping = true;
+                this.dampingFactor = 0.05;
+                this.enableZoom = true;
+                this.enableRotate = true;
+                this.enablePan = true;
+                this.autoRotate = false;
+                this.autoRotateSpeed = 2.0;
+                this.minDistance = 0;
+                this.maxDistance = Infinity;
+                this.minPolarAngle = 0;
+                this.maxPolarAngle = Math.PI;
+                this.minAzimuthAngle = -Infinity;
+                this.maxAzimuthAngle = Infinity;
+                
+                // Internal state
+                const scope = this;
+                const spherical = new THREE.Spherical();
+                const sphericalDelta = new THREE.Spherical();
+                let scale = 1;
+                const panOffset = new THREE.Vector3();
+                let isMouseDown = false;
+                let mouseButtons = { LEFT: 0, MIDDLE: 1, RIGHT: 2 };
+                let lastPosition = new THREE.Vector3();
+                let lastQuaternion = new THREE.Quaternion();
+                
+                // Mouse event handlers
+                function onMouseDown(event) {
+                    if (!scope.enabled) return;
+                    isMouseDown = true;
+                    lastPosition.copy(scope.object.position);
+                    lastQuaternion.copy(scope.object.quaternion);
+                }
+                
+                function onMouseMove(event) {
+                    if (!scope.enabled || !isMouseDown) return;
+                    
+                    const deltaX = event.movementX || 0;
+                    const deltaY = event.movementY || 0;
+                    
+                    if (event.button === mouseButtons.LEFT || event.buttons === 1) {
+                        // Rotate
+                        rotateLeft(2 * Math.PI * deltaX / scope.domElement.clientHeight);
+                        rotateUp(2 * Math.PI * deltaY / scope.domElement.clientHeight);
+                    }
+                    
+                    scope.update();
+                }
+                
+                function onMouseUp(event) {
+                    isMouseDown = false;
+                }
+                
+                function onWheel(event) {
+                    if (!scope.enabled || !scope.enableZoom) return;
+                    event.preventDefault();
+                    
+                    if (event.deltaY < 0) {
+                        dollyIn(getZoomScale());
+                    } else if (event.deltaY > 0) {
+                        dollyOut(getZoomScale());
+                    }
+                    
+                    scope.update();
+                }
+                
+                // Helper functions
+                function rotateLeft(angle) {
+                    sphericalDelta.theta -= angle;
+                }
+                
+                function rotateUp(angle) {
+                    sphericalDelta.phi -= angle;
+                }
+                
+                function dollyIn(dollyScale) {
+                    scale *= dollyScale;
+                }
+                
+                function dollyOut(dollyScale) {
+                    scale /= dollyScale;
+                }
+                
+                function getZoomScale() {
+                    return Math.pow(0.95, 1);
+                }
+                
+                // Public methods
+                this.update = function() {
+                    const offset = new THREE.Vector3();
+                    const quat = new THREE.Quaternion().setFromUnitVectors(scope.object.up, new THREE.Vector3(0, 1, 0));
+                    const quatInverse = quat.clone().invert();
+                    
+                    const position = scope.object.position;
+                    offset.copy(position).sub(scope.target);
+                    offset.applyQuaternion(quat);
+                    spherical.setFromVector3(offset);
+                    
+                    spherical.theta += sphericalDelta.theta;
+                    spherical.phi += sphericalDelta.phi;
+                    
+                    spherical.phi = Math.max(scope.minPolarAngle, Math.min(scope.maxPolarAngle, spherical.phi));
+                    spherical.makeSafe();
+                    spherical.radius *= scale;
+                    spherical.radius = Math.max(scope.minDistance, Math.min(scope.maxDistance, spherical.radius));
+                    
+                    offset.setFromSpherical(spherical);
+                    offset.applyQuaternion(quatInverse);
+                    position.copy(scope.target).add(offset);
+                    scope.object.lookAt(scope.target);
+                    
+                    if (scope.enableDamping) {
+                        sphericalDelta.theta *= (1 - scope.dampingFactor);
+                        sphericalDelta.phi *= (1 - scope.dampingFactor);
+                    } else {
+                        sphericalDelta.set(0, 0, 0);
+                    }
+                    
+                    scale = 1;
+                    
+                    return true;
+                };
+                
+                this.dispose = function() {
+                    scope.domElement.removeEventListener('mousedown', onMouseDown);
+                    scope.domElement.removeEventListener('mousemove', onMouseMove);
+                    scope.domElement.removeEventListener('mouseup', onMouseUp);
+                    scope.domElement.removeEventListener('wheel', onWheel);
+                };
+                
+                // Event listeners
+                this.domElement.addEventListener('mousedown', onMouseDown);
+                this.domElement.addEventListener('mousemove', onMouseMove);
+                this.domElement.addEventListener('mouseup', onMouseUp);
+                this.domElement.addEventListener('wheel', onWheel, { passive: false });
+                
+                // Initialize position
+                this.object.position.copy(this.object.position);
+                this.update();
+            };
+        }
+        
+        // Load OrbitControls and then update status
+        window.orbitControlsPromise.then(() => {
+            document.getElementById('orbit-status').textContent = 
+                (typeof THREE !== 'undefined' && typeof THREE.OrbitControls !== 'undefined') ? 
+                'OrbitControls: ✅ Loaded' : 'OrbitControls: ❌ Not loaded';
+        });
+    </script>
+    
+    <!-- Load our modules after ensuring dependencies are ready -->
+    <script src="/js/core/Renderer.js"></script>
+    <script src="/js/core/GeometryFactory.js"></script>
+    <script src="/js/ui/ViewerController.js"></script>
+    
+    <script>
+        // Update status after loading
+        document.getElementById('renderer-status').textContent = 
+            typeof Renderer !== 'undefined' ? 'Renderer: ✅ Loaded' : 'Renderer: ❌ Not loaded';
+        
+        document.getElementById('geometry-status').textContent = 
+            typeof GeometryFactory !== 'undefined' ? 'GeometryFactory: ✅ Loaded' : 'GeometryFactory: ❌ Not loaded';
+        
+        document.getElementById('controller-status').textContent = 
+            typeof ViewerController !== 'undefined' ? 'ViewerController: ✅ Loaded' : 'ViewerController: ❌ Not loaded';
+        
+        // Try to initialize
+        setTimeout(() => {
+            // Wait for OrbitControls before initializing viewer
+            window.orbitControlsPromise.then(() => {
+                console.log('OrbitControls ready, attempting viewer initialization...');
+                
+                if (typeof ViewerController !== 'undefined') {
+                    try {
+                        // Verify OrbitControls is available
+                        if (typeof THREE === 'undefined' || typeof THREE.OrbitControls === 'undefined') {
+                            throw new Error('THREE.js or OrbitControls not loaded properly');
+                        }
+                        
+                        console.log('Attempting to initialize viewer...');
+                        const viewer = new ViewerController('viewer-container');
+                        console.log('Viewer initialized successfully:', viewer);
+                        
+                        // Add detailed debugging
+                        setTimeout(() => {
+                            console.log('=== Debug Information ===');
+                            console.log('Renderer state:', viewer.renderer ? viewer.renderer.state : 'No renderer');
+                            console.log('Current object:', viewer.renderer ? viewer.renderer.currentObject : 'No current object');
+                            console.log('Scene children count:', viewer.renderer ? viewer.renderer.scene.children.length : 'No scene');
+                            console.log('Camera position:', viewer.renderer ? viewer.renderer.camera.position : 'No camera');
+                            console.log('Viewer state:', viewer.state);
+                            
+                            // Output to visible debug area
+                            const debugOutput = document.getElementById('debug-output');
+                            let debugText = '=== Debug Information ===\n';
+                            debugText += `Renderer state: ${viewer.renderer ? JSON.stringify(viewer.renderer.state) : 'No renderer'}\n`;
+                            debugText += `Current object: ${viewer.renderer && viewer.renderer.currentObject ? 'Present' : 'None'}\n`;
+                            debugText += `Scene children count: ${viewer.renderer ? viewer.renderer.scene.children.length : 'No scene'}\n`;
+                            debugText += `Camera position: ${viewer.renderer ? `x:${viewer.renderer.camera.position.x.toFixed(2)}, y:${viewer.renderer.camera.position.y.toFixed(2)}, z:${viewer.renderer.camera.position.z.toFixed(2)}` : 'No camera'}\n`;
+                            debugText += `Viewer state: ${JSON.stringify(viewer.state)}\n`;
+                            
+                            // Try to manually add a cube if none exists
+                            if (viewer.renderer && (!viewer.renderer.currentObject || viewer.renderer.scene.children.length <= 2)) {
+                                console.log('No 3D object found, trying to add one manually...');
+                                debugText += '\nNo 3D object found, trying to add one manually...\n';
+                                try {
+                                    viewer.showShape('cube');
+                                    console.log('Manually added cube. Scene children now:', viewer.renderer.scene.children.length);
+                                    console.log('Current object:', viewer.renderer.currentObject);
+                                    debugText += `Manually added cube. Scene children now: ${viewer.renderer.scene.children.length}\n`;
+                                    debugText += `Current object: ${viewer.renderer.currentObject ? 'Present' : 'None'}\n`;
+                                } catch (error) {
+                                    console.error('Failed to manually add cube:', error);
+                                    debugText += `Failed to manually add cube: ${error.message}\n`;
+                                }
+                            }
+                            
+                            // Test if render loop is running
+                            if (viewer.renderer && viewer.renderer.renderer) {
+                                console.log('Renderer domElement:', viewer.renderer.renderer.domElement);
+                                console.log('Canvas size:', viewer.renderer.renderer.getSize(new THREE.Vector2()));
+                                const size = viewer.renderer.renderer.getSize(new THREE.Vector2());
+                                debugText += `Canvas size: ${size.x}x${size.y}\n`;
+                                debugText += `Canvas in DOM: ${viewer.renderer.renderer.domElement ? 'Yes' : 'No'}\n`;
+                            }
+                            
+                            debugOutput.textContent = debugText;
+                        }, 2000);
+                        
+                        const debugInfo = document.getElementById('debug-info');
+                        debugInfo.innerHTML += `<div style="color: green;">✅ Viewer initialized successfully!</div>`;
+                    } catch (error) {
+                        console.error('Failed to initialize viewer:', error);
+                        const debugInfo = document.getElementById('debug-info');
+                        debugInfo.innerHTML += `<div style="color: red;">❌ Error: ${error.message}</div>`;
+                        debugInfo.innerHTML += `<div style="color: red;">Stack: ${error.stack}</div>`;
+                    }
+                } else {
+                    console.error('ViewerController not available');
+                    const debugInfo = document.getElementById('debug-info');
+                    debugInfo.innerHTML += `<div style="color: red;">❌ ViewerController class not found</div>`;
+                }
+            });
+        }, 1000);
+        
+        // Global error handler
+        window.onerror = function(msg, url, lineNo, columnNo, error) {
+            console.error('Global error:', msg, url, lineNo, columnNo, error);
+            const debugInfo = document.getElementById('debug-info');
+            debugInfo.innerHTML += `<div style="color: red;">❌ Global Error: ${msg} at ${url}:${lineNo}:${columnNo}</div>`;
+        };
+    </script>
+</body>
+</html> 
